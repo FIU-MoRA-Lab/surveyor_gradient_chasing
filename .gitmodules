@@ -1,0 +1,3 @@
+[submodule "surveyor_library"]
+	path = surveyor_library
+	url = https://github.com/FIU-MoRA-Lab/searobotics_surveyor.git
