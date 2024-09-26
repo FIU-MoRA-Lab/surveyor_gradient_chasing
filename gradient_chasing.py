@@ -1,8 +1,9 @@
 import surveyor_library.surveyor_helper as hlp
 import surveyor_library
 from gradient_chasing_utils import water_phenomenon
-import sys
+import argparse
 import time
+import sys
 import pandas as pd
 import numpy as np
 from geopy.distance import geodesic
@@ -137,8 +138,17 @@ def main(filename, erp_filename, mission_postfix=""):
 
 
 if __name__ == "__main__":
-    print("Usage: gradient_chasing.py <filename> <erp_filename> <mission_postfix>")
-    if len(sys.argv) not in [3, 4]:
-        sys.exit(1)
+    # Add arguments
+    if len(sys.argv) == 1:
+        print(f'Run {sys.argv[0]} -h  for help')
+        sys.exit(0)
+    parser = argparse.ArgumentParser(description='Gradient chasing script.')
+    parser.add_argument('filename', type=str, help='Path to the main data CSV file.')
+    parser.add_argument('erp_filename', type=str, help='Path to the ERP data CSV file.')
+    parser.add_argument('--mission_postfix', type=str, default="", help='Optional postfix for the mission (default: empty).')
 
-    main(*sys.argv[1:])
+    # Parse the command line arguments
+    args = parser.parse_args()
+
+    # Call the main function with the parsed arguments
+    main(args.filename, args.erp_filename, args.mission_postfix)
