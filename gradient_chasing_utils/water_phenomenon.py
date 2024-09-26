@@ -111,7 +111,6 @@ class WaterPhenomenonGP:
         else:
             print('No movement')
             direction = np.array([0., 0.])
-        print(gradient, direction, x_inv)
         # Compute the next point in the normalized space and transform it back
         next_point_inv = x_inv + lr * direction
         return self._normalizer.inverse(next_point_inv)
