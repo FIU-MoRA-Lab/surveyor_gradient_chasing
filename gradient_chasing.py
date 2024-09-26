@@ -1,6 +1,7 @@
 import surveyor_library.surveyor_helper as hlp
 import surveyor_library
-from gradient_chasing_utils import utils_gp_gradient
+import gradient_chasing_utils
+from gradient_chasing_utils import water_phenomenon
 
 import sys
 import time
@@ -12,101 +13,60 @@ import matplotlib.pyplot as plt
 
 
 def allocate_data_df(boat):
-    """
-    Allocate a DataFrame to store the boat's data.
-
-    Args:
-        boat (Surveyor): The Surveyor object representing the boat.
-
-    Returns:
-        pd.DataFrame: A DataFrame containing the boat's initial data.
-    """
     return pd.DataFrame([boat.get_data()])
 
 def start_mission(boat):
     """
     Start the mission by waiting for the operator to switch to waypoint mode.
-
-    Args:
-        boat (Surveyor): The Surveyor object representing the boat.
     """
-    print('Ready to start the mission! Switch manually to waypoint mode')
-    boat.set_standby_mode()
-
+    countdown(2, "Starting mission in")
     while boat.get_control_mode() != "Waypoint":
-        pass
-
-    countdown(5, "Starting mission in", "Change the operator to secondary mode!")
+        boat.set_waypoint_mode()
     print('Mission started!')
 
-def countdown(count, message, additional_message=""):
+def countdown(count, message):
     """
     Print a countdown with the given message and optional additional message.
 
     Args:
         count (int): The number of seconds to count down.
         message (str): The message to display before the countdown.
-        additional_message (str, optional): An additional message to display after the countdown.
     """
     for i in range(count, 0, -1):
-        print(f'{message} {i}. {additional_message}', end="\r")
+        print(f'{message} {i}.', end="\r")
         time.sleep(1)
-    print()   
+    print()  
+ 
+def plot_caller(boat, water_phenomenon, next_point):
+    plot_caller.coordinates.append(boat.get_gps_coordinates())
+    water_phenomenon.plot_env_and_path(np.asarray(plot_caller.coordinates), next_point)
+plot_caller.coordinates = []  
 
-def load_and_send_waypoint(boat, waypoint, erp, throttle):
-    """
-    Load the next waypoint and send it to the boat.
-
-    Args:
-        boat (Surveyor): The Surveyor object representing the boat.
-        waypoint (tuple): The waypoint coordinates to be sent.
-        erp (list): A list of ERP coordinates.
-        throttle (int): The desired throttle value for the boat.
-
-    """
-    boat.send_waypoints([waypoint], erp, throttle)
-
-    while boat.get_control_mode() != 'Waypoint':
-        dist = geodesic(waypoint, boat.get_gps_coordinates()).meters
-        print(f'Distance to next waypoint {dist}')
-        boat.set_waypoint_mode()
-        if dist <= 2.0:
-            break
-        
-
-FEATURE_TO_CHASE = 'ODO (mg/L)'
-def data_updater(boat, mission_postfix = ''):
+def data_updater(boat, water_feature, mission_postfix = ''):
     global DATA
     data_dict = boat.get_data()
     DATA = pd.concat([DATA,
                     pd.DataFrame([data_dict])])
-    print(DATA[['Latitude', 'Longitude', FEATURE_TO_CHASE]])
+    print(DATA[['Latitude', 'Longitude', water_feature]])
     hlp.save(data_dict, mission_postfix)
 
-def next_waypoint(step_size = 4.5 ):
+def next_waypoint(step_size = 4.5):
     global DATA
     X = np.asarray(DATA[['Latitude', 'Longitude']])
     y = np.asarray(DATA[FEATURE_TO_CHASE])
     water_feature_gp.fit(X, y)
-    utils_gp_gradient.plot_env_and_path(
-        environment = lambda x: water_feature_gp._gaussian_process.predict(water_feature_gp._normalizer.forward(x)), #To be explained, Jose's stuff
-        path = X,
-        extent = (*MINS, *MAXS)
-    )
     return water_feature_gp.next_point(X[-1], step_size)
 
-plt.ion()
+
 
 # GP initialization
 kernel = 10 * Matern(nu=0.5, length_scale_bounds=(1e-2, 1e5)) + 1e-2 * DotProduct() ** 1
-extent_coordinates = np.array([[25.7581072, -80.3738942],
-                                [25.7581072, -80.3734494],
-                                [25.7583659, -80.3738942],
-                                [25.7583659, -80.3734494]])
+extent_coordinates = np.loadtxt('out/polygon_coordinates_mmc.csv', delimiter=',', skiprows=1)
 
-MAXS, MINS = np.max(extent_coordinates, axis = 0), np.min(extent_coordinates, axis = 0)
-water_feature_gp = utils_gp_gradient.WaterPhenomenonGP(MINS, MAXS, kernel)
+FEATURE_TO_CHASE = 'ODO (%Sat)'
+water_feature_gp = water_phenomenon.WaterPhenomenonGP(extent_coordinates, kernel)
 THROTTLE = 30; DATA = pd.DataFrame()
+# plt.ion()
 
 def main(filename, erp_filename, mission_postfix= ""):
     print(f'Reading waypoints from {filename} and ERP from {erp_filename}')
@@ -116,30 +76,33 @@ def main(filename, erp_filename, mission_postfix= ""):
     boat = surveyor_library.Surveyor()
     
     print(f'{len(initial_waypoints)} initial waypoints')
-
+    
     with boat:
         start_mission(boat)
+        water_feature_gp.plot_initialization(delta = 0.0004)
         for initial_waypoint in initial_waypoints:
             boat.go_to_waypoint(initial_waypoint, erp, THROTTLE)
 
             while boat.get_control_mode() == 'Waypoint':
                 print(f'Initial collection mission waypoint {initial_waypoint}', end="\r")
+                plot_caller(boat, water_feature_gp, initial_waypoint )
 
-            data_updater(boat, mission_postfix = mission_postfix) # Finished, getting data
+            data_updater(boat, mission_postfix = mission_postfix, water_feature=FEATURE_TO_CHASE) # Finished, getting data
 
         print('Starting gradient chasing')
         for i in range(30):
-            waypoint = next_waypoint(DATA)
+            waypoint = next_waypoint()
             print(f'Loading waypoint {i + 1}')
             boat.go_to_waypoint(waypoint, erp, THROTTLE)
 
             while boat.get_control_mode() == 'Waypoint':
-                print(f'Navigating to waypoint {i + 1}', end="\r")
+                print(f'Navigating to waypoint {i + 1}' ,waypoint, end="\r")
+                plot_caller(boat, water_feature_gp, waypoint )
                 # When you break this while loop you should have reached the waypoint, ready to assign a new waypoint
 
-            data_updater(boat, mission_postfix = mission_postfix)
+            data_updater(boat, mission_postfix = mission_postfix, water_feature=FEATURE_TO_CHASE)
 
-    plt.ioff() 
+    # plt.ioff() 
     plt.show()
             
 if __name__ == "__main__":
