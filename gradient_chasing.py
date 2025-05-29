@@ -1,5 +1,5 @@
-import surveyor_library.surveyor_helper as hlp
-import surveyor_library
+import surveyor_library.surveyor_lib.helpers as hlp
+import surveyor_library.surveyor_lib.surveyor as surveyor
 from gradient_chasing_utils import water_phenomenon
 import argparse
 import time
@@ -9,17 +9,13 @@ import numpy as np
 from geopy.distance import geodesic
 from sklearn.gaussian_process.kernels import DotProduct, Matern
 import matplotlib.pyplot as plt
+from mock_surveyor import MockSurveyor 
 
 
 # Global Variables
 DATA = pd.DataFrame()
-THROTTLE = 30
+THROTTLE = 20
 FEATURE_TO_CHASE = 'ODO (%Sat)'
-
-# Initialize Gaussian Process for water phenomenon
-kernel = 10 * Matern(nu=0.5, length_scale_bounds=(1e-2, 1e5)) + 1e-2 * DotProduct() ** 1
-extent_coordinates = np.loadtxt('out/polygon_coordinates_mmc.csv', delimiter=',', skiprows=1)
-water_feature_gp = water_phenomenon.WaterPhenomenonGP(extent_coordinates, kernel)
 
 
 def allocate_data_df(boat):
@@ -72,7 +68,7 @@ def data_updater(boat, mission_postfix=''):
     hlp.save(data_dict, mission_postfix)
 
 
-def next_waypoint(step_size=4.5):
+def next_waypoint(water_feature_gp, step_size=4.0):
     """
     Calculate the next waypoint using Gaussian Process.
 
@@ -89,24 +85,33 @@ def next_waypoint(step_size=4.5):
     return water_feature_gp.next_point(X[-1], step_size)
 
 
-def main(filename, erp_filename, mission_postfix=""):
+def main(filename, erp_filename, extent_filename, mission_postfix=""):
     """
     Main function to execute the gradient chasing mission.
 
     Args:
         filename (str): The filename of the waypoints CSV.
         erp_filename (str): The filename of the ERP CSV.
+        extent_filename (str): The filename of the extent coordinates CSV.
         mission_postfix (str): Optional postfix for mission-specific data saving.
     """
-    print(f'Reading waypoints from {filename} and ERP from {erp_filename}')
+    print(f'Reading waypoints from {filename}, ERP from {erp_filename}, and extent coordinates from {extent_filename}')
     initial_waypoints = hlp.read_csv_into_tuples(filename)
     erp = hlp.read_csv_into_tuples(erp_filename)
-    boat = surveyor_library.Surveyor()
+    extent_coordinates = np.loadtxt(extent_filename, delimiter=',', skiprows=1)
+
+    # Initialize Gaussian Process for water phenomenon
+    kernel = 10 * Matern(nu=0.5, length_scale_bounds=(1e-2, 1e5)) + 1e-2 * DotProduct() ** 1
+    water_feature_gp = water_phenomenon.WaterPhenomenonGP(extent_coordinates, kernel)
+
+    # boat = surveyor.Surveyor()
+    boat = MockSurveyor(erp[0])
+    print(initial_waypoints)
     
     print(f'{len(initial_waypoints)} initial waypoints')
     
     with boat:
-        start_mission(boat)
+        # start_mission(boat)
         water_feature_gp.plot_initialization(delta=0.00015)
 
         for initial_waypoint in initial_waypoints:
@@ -115,26 +120,26 @@ def main(filename, erp_filename, mission_postfix=""):
             while boat.get_control_mode() == 'Waypoint':
                 current_coordinates = plot_caller(boat, water_feature_gp, initial_waypoint)
                 print(f'Initial collection mission waypoint {initial_waypoint}. '\
-                      f'Distance {geodesic(current_coordinates, initial_waypoint).meters}', end="\r")
-                plot_caller(boat, water_feature_gp, initial_waypoint)
+                      f'Distance {geodesic(current_coordinates, initial_waypoint).meters}'
+                      )
+                time.sleep(0.05)
 
-            data_updater(boat, mission_postfix=mission_postfix, water_feature=FEATURE_TO_CHASE)  # Finished, getting data
+            data_updater(boat, mission_postfix=mission_postfix)  # Finished, getting data
 
         print('Starting gradient chasing')
         for i in range(30):
-            waypoint = next_waypoint()
+            waypoint = next_waypoint(water_feature_gp, step_size=5)
             print(f'Loading waypoint {i + 1}')
             boat.go_to_waypoint(waypoint, erp, THROTTLE)
 
             while boat.get_control_mode() == 'Waypoint':
                 current_coordinates = plot_caller(boat, water_feature_gp, waypoint)
-                print(f'Navigating to waypoint {i + 1} {waypoint}. '\
-                      f'Distance {geodesic(current_coordinates, initial_waypoint).meters}', end="\r")
+                print(f'Navigating to waypoint {i + 1}. From {current_coordinates} to {waypoint} '\
+                      f'Distance {geodesic(current_coordinates, waypoint).meters}')
                 
 
-            data_updater(boat, mission_postfix=mission_postfix, water_feature=FEATURE_TO_CHASE)
-
-    plt.show()  # Show the plot after the mission ends
+            data_updater(boat, mission_postfix=mission_postfix)
+        plt.show()  # Show the plot after the mission ends
 
 
 if __name__ == "__main__":
@@ -145,10 +150,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='Gradient chasing script.')
     parser.add_argument('filename', type=str, help='Path to the main data CSV file.')
     parser.add_argument('erp_filename', type=str, help='Path to the ERP data CSV file.')
+    parser.add_argument('extent_filename', type=str, help='Path to the extent coordinates CSV file.')
     parser.add_argument('--mission_postfix', type=str, default="", help='Optional postfix for the mission (default: empty).')
 
     # Parse the command line arguments
     args = parser.parse_args()
 
     # Call the main function with the parsed arguments
-    main(args.filename, args.erp_filename, args.mission_postfix)
+    main(args.filename, args.erp_filename, args.extent_filename, args.mission_postfix)

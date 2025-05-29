@@ -8,6 +8,8 @@ import cartopy.crs as ccrs
 import cartopy.io.img_tiles as cimgt
 import matplotlib.pyplot as plt
 import pickle
+from matplotlib.patches import Polygon
+from matplotlib.path import Path
 
 class WaterPhenomenonGP:
     """
@@ -33,6 +35,7 @@ class WaterPhenomenonGP:
         """
         # Extract origin for normalization
         self.domain = np.atleast_2d(domain)
+        self.polygon_coords = np.vstack([self.domain, self.domain[0]])
         self.origin = np.min(domain, axis = 0)
         
         # Initialize the normalizer
@@ -113,8 +116,96 @@ class WaterPhenomenonGP:
             direction = np.array([0., 0.])
         # Compute the next point in the normalized space and transform it back
         next_point_inv = x_inv + lr * direction
-        return self._normalizer.inverse(next_point_inv)
+        next_point = self._normalizer.inverse(next_point_inv)
+        # next_point = self.bounce_within_domain(next_point)
+        next_point = self.rotate_within_domain(direction, x_inv, lr)
+        return next_point
 
+    def bounce_within_domain(self, next_point):
+        """
+        Checks if next_point is within the polygon defined by self.polygon_coords.
+        If not, reflects it back inside the polygon along the direction from the centroid.
+
+        Args:
+            next_point (np.ndarray): The point to check (latitude, longitude).
+
+        Returns:
+            np.ndarray: The adjusted point inside the polygon.
+        """
+
+        # Convert polygon coordinates to (lon, lat) for Path
+        polygon_path = Path(np.array(self.polygon_coords)[:, [1, 0]])
+
+        # next_point is (lat, lon); convert to (lon, lat) for checking
+        point = np.array([next_point[1], next_point[0]])
+
+        if polygon_path.contains_point(point):
+            return next_point  # It's already inside
+
+        print('Point is outside the polygon, reflecting back inside.')
+
+        # Compute the centroid of the polygon in (lon, lat)
+        centroid = np.mean(np.array(self.polygon_coords)[:, [1, 0]], axis=0)
+
+        # Direction vector from centroid to point
+        direction = point - centroid
+
+        # Binary search to find the farthest point inside along the direction
+        low, high = 0.0, 1.0
+        for _ in range(20):
+            mid = (low + high) / 2
+            candidate = centroid + direction * mid
+            if polygon_path.contains_point(candidate):
+                low = mid
+            else:
+                high = mid
+
+        # Slightly back inside the polygon
+        reflected = centroid + direction * low * 0.9
+
+        # Return in (lat, lon) order
+        return np.array([reflected[1], reflected[0]])
+    
+    def rotate_within_domain(self, direction, x_inv, lr):
+        """
+        Rotates the direction vector to ensure it stays within the domain polygon.
+
+        Args:
+            direction (np.ndarray): The direction vector to rotate.
+
+        Returns:
+            np.ndarray: The rotated direction vector.
+        """
+        # Convert polygon coordinates to (lon, lat) for Path
+        next_point_inv = x_inv + lr * direction
+        next_point = self._normalizer.inverse(next_point_inv)
+        polygon_path = Path(np.array(self.polygon_coords))
+        if polygon_path.contains_point(next_point):
+            return next_point
+        print('Point is outside the polygon, rotating direction to find a valid point.')
+        for angle in self.rotate_within_domain.rotation_angles:
+            angle = -angle  # Invert angle to match the direction of rotation
+            print('a',angle*180/np.pi, next_point)
+              # 45 degrees in radians
+            rotation_matrix = np.array([[np.cos(angle), -np.sin(angle)],
+                                    [np.sin(angle), np.cos(angle)]])
+            # Rotate the direction vector by 90 degrees
+            tentative_direction = rotation_matrix @ direction
+            next_point_inv = x_inv + lr * tentative_direction
+            next_point = self._normalizer.inverse(next_point_inv)  
+            if polygon_path.contains_point(next_point):
+                print('Point is inside the polygon after rotation.')
+                break
+
+
+        return next_point
+    # Interleave positive and negative angles for rotation
+    base_angles = np.linspace(0, np.pi, 18, endpoint=False)
+    angles = np.empty(36)
+    angles[0::2] = base_angles
+    angles[1::2] = -base_angles
+    rotate_within_domain.rotation_angles = angles
+    
     def plot_initialization(self, delta=0.00015,
                         plot_args={'marker': 'x', 'color': 'black'},
                         contourf_args={'cmap': 'jet', 'alpha': 0.5, 'levels' : 15}):
@@ -127,7 +218,7 @@ class WaterPhenomenonGP:
         if self._fig is None or self._ax is None:
             tiler = cimgt.GoogleTiles(style='satellite')
             transform = ccrs.PlateCarree()
-            self._fig, self._ax = plt.subplots(figsize=(6, 4), subplot_kw={'projection': transform})
+            self._fig, self._ax = plt.subplots(figsize=(8, 10), subplot_kw={'projection': transform})
             self._ax.add_image(tiler, 20)
             self._ax.set_aspect('equal', adjustable='box')
             gl = self._ax.gridlines(draw_labels=True)
@@ -137,7 +228,13 @@ class WaterPhenomenonGP:
         # Set the extent of the map with a margin
         self._ax.set_extent([min_lon - delta, max_lon + delta, min_lat - delta, max_lat + delta], crs=ccrs.PlateCarree())
         self._path_plt,  = self._ax.plot([],[], transform=ccrs.PlateCarree(), label = 'current path', **plot_args)
-        self._current_point_plt = self._ax.scatter([], [], transform=ccrs.PlateCarree(), label = 'Next point', color = 'red')
+        self._current_point_plt = self._ax.scatter([0], [0], transform=ccrs.PlateCarree(), label='Next point', color='red',zorder=10)
+        # Plot the domain polygon
+
+        # Ensure domain is a closed polygon
+        
+        self.poly = Polygon(self.polygon_coords[:, [1, 0]], closed=True, edgecolor='orange', facecolor='none', linewidth=2, zorder=5, label='Domain')
+        self._ax.add_patch(self.poly)
 
 
     def plot_env_and_path(self, path, next_point):
@@ -167,17 +264,22 @@ class WaterPhenomenonGP:
 
         # Plot the interpolated environment values as contours
         try:
-            for c in self._c.collections:
-                c.remove()
+            self._c.remove()  
+            # for c in self._c.collections:
+            #     c.remove()
         except:
+            print('failed to remove previous contours')
             pass
         self._c = self._ax.contourf(self._lon_grid, self._lat_grid, interpolated_values, transform=ccrs.PlateCarree())
+        self._c.set_clip_path(self.poly)
+        # print('mean value of the environment:', np.mean(interpolated_values))
         # Update the path plot data
         self._path_plt.set_xdata(path[:-1, 1])  # Update x data
         self._path_plt.set_ydata(path[:-1, 0])  # Update y data
         
         # Update the current point plot data
-        self._current_point_plt.set_offsets((next_point[1], next_point[0]))  # Update position of the scatter point
+        next_point = np.asarray([[next_point[1], next_point[0]]])
+        self._current_point_plt.set_offsets(next_point)  # Update position of the scatter point
 
         self._ax.legend()
         plt.draw()
