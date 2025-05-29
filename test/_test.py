@@ -1,79 +1,96 @@
+from time import time
+
 import numpy as np
-import matplotlib.pyplot as plt
 from matplotlib.path import Path
 
-class DummyNormalizer:
-    def __init__(self, center):
-        self.center = np.array(center)
 
-    def inverse(self, point):
-        # Simulates converting a normalized point back to world coordinates
-        return point + self.center
+# Mock data for testing
+polygon_coords = np.array(
+    [
+        [25.7617, -80.1918],
+        [25.7618, -80.1917],
+        [25.7616, -80.1919],
+        [25.7617, -80.1919],
+        [25.7618, -80.1918],
+    ]
+)
+direction = np.array([0.001, 0.001])
+x_inv = np.array([25.7617, -80.1918])
+lr = 1.0
 
-class DomainHandler:
-    def __init__(self, polygon_coords):
-        self.polygon_coords = polygon_coords
-        self._normalizer = DummyNormalizer(center=[5.0, 5.0])
+# Precompute rotation angles
+n = 3
+_base_angles = np.linspace(0, np.pi, n, endpoint=False)
+_rotation_angles = np.empty(n * 2)
+_rotation_angles[0::2] = _base_angles
+_rotation_angles[1::2] = -_base_angles
 
-    def rotate_within_domain(self, direction, x_inv, lr):
-        """
-        Rotates the direction vector to ensure it stays within the domain polygon.
-        """
-        next_point_inv = x_inv + lr * direction
-        next_point = self._normalizer.inverse(next_point_inv)
-        polygon_path = Path(np.array(self.polygon_coords)[:, [1, 0]])  # (lon, lat)
 
-        if polygon_path.contains_point(next_point[::-1]):
-            return next_point
+# Original implementation
+def original_rotate_within_domain(direction, x_inv, lr, polygon_coords):
+    next_norm = x_inv + lr * direction
+    next_point = next_norm  # Mock normalization
+    polygon_path = Path(polygon_coords)
+    if polygon_path.contains_point(next_point):
+        return next_point
+    for angle in _rotation_angles:
+        rot = np.array(
+            [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        )
+        rotated_dir = rot @ direction
+        print(rotated_dir)  # Debugging line to check shape
+        candidate_norm = x_inv + lr * rotated_dir
+        candidate = candidate_norm  # Mock normalization
+        if polygon_path.contains_point(candidate):
+            return candidate
+    return x_inv  # Fallback to the original point if no valid rotation found
 
-        rotation_angles = np.linspace(0, 2 * np.pi, 8, endpoint=False)  # 8 directions
-        for angle in rotation_angles:
-            print('Trying rotation angle (rad):', angle)
-            rotation_matrix = np.array([
-                [np.cos(angle), -np.sin(angle)],
-                [np.sin(angle),  np.cos(angle)]
-            ])
-            tentative_direction = rotation_matrix @ direction
-            next_point_inv = x_inv + lr * tentative_direction
-            next_point = self._normalizer.inverse(next_point_inv)
-            if polygon_path.contains_point(next_point[::-1]):
-                print('Point is inside the polygon after rotation.')
-                return next_point
 
-        print('No valid direction found; returning last attempt')
+# Optimized implementation using vectorized operations
+# Compute all rotated directions at once
+rotations = np.array(
+    [
+        [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+        for angle in _rotation_angles
+    ]
+)
+polygon_path = Path(polygon_coords)
+
+
+def optimized_rotate_within_domain(direction, x_inv, lr, polygon_coords):
+    next_norm = x_inv + lr * direction
+    next_point = next_norm  # Mock normalization
+
+    if polygon_path.contains_point(next_point):
         return next_point
 
+    # print(rotations.shape)  # Debugging line to check shape
+    rotated_dirs = rotations @ direction
+    print(rotated_dirs)  # Debugging line to check shape
+    # Check all candidates
+    candidates_norm = x_inv + lr * rotated_dirs
+    for candidate in candidates_norm:
+        if polygon_path.contains_point(candidate):
+            return candidate
 
-if __name__ == "__main__":
-    polygon = [
-        [2, 2],
-        [8, 2],
-        [8, 8],
-        [2, 8],
-        [2, 2]
-    ]
+    return x_inv  # Fallback to the original point if no valid rotation found
 
-    handler = DomainHandler(polygon_coords=polygon)
 
-    x_inv = np.array([0.0, 0.0])              # Relative to the center
-    direction = np.array([1.0, 0.0])          # Initially toward the right
-    lr = 6.0                                  # Step size
+# Benchmarking
+iterations = 1
 
-    new_point = handler.rotate_within_domain(direction, x_inv, lr)
+# Original implementation
+start_time = time()
+for _ in range(iterations):
+    original_rotate_within_domain(direction, x_inv, lr, polygon_coords)
+original_duration = time() - start_time
+print("-" * 50)
+# Optimized implementation
+start_time = time()
+for _ in range(iterations):
+    optimized_rotate_within_domain(direction, x_inv, lr, polygon_coords)
+optimized_duration = time() - start_time
 
-    # Visualization
-    poly = np.array(polygon)
-    fig, ax = plt.subplots()
-    ax.plot(poly[:, 1], poly[:, 0], 'k-', label="Polygon")
-
-    origin = np.array([5.0, 5.0])
-    ax.plot(origin[1], origin[0], 'ro', label='Origin')
-    ax.plot(new_point[1], new_point[0], 'go', label='Final Point in Polygon')
-
-    ax.set_xlim(0, 10)
-    ax.set_ylim(0, 10)
-    ax.set_aspect('equal')
-    ax.legend()
-    ax.set_title("Test: rotate_within_domain")
-    plt.grid(True)
-    plt.show()
+# Results
+print(f"Original implementation duration: {original_duration:.4f} seconds")
+print(f"Optimized implementation duration: {optimized_duration:.4f} seconds")

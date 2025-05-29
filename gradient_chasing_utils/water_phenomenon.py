@@ -1,305 +1,162 @@
 import numpy as np
+from matplotlib.path import Path
+from numpy.linalg import norm
 from sklearn.gaussian_process import GaussianProcessRegressor
 from sklearn.gaussian_process.kernels import RBF
-from numpy.linalg import norm
-from normalizer import Normalizer
-import matplotlib.pyplot as plt
-import cartopy.crs as ccrs
-import cartopy.io.img_tiles as cimgt
-import matplotlib.pyplot as plt
-import pickle
-from matplotlib.patches import Polygon
-from matplotlib.path import Path
+
+from .normalizer import Normalizer
+from .wp_plotter import WaterPhenomenonPlotter
+
 
 class WaterPhenomenonGP:
     """
-    WaterPhenomenonGP models water-related phenomena using Gaussian Processes.
+    Gaussian Process model for water-related phenomena over a geographic domain.
 
-    This class uses a Gaussian Process (GP) to model and make predictions about water-related phenomena
-    based on latitude and longitude coordinates. It normalizes the input data, fits the GP model, and 
-    computes gradients to suggest the next point for analysis.
-
-    Attributes:
-        _normalizer (Normalizer): An instance of the Normalizer class to handle data normalization.
-        _gaussian_process (GaussianProcessRegressor): The Gaussian Process model for regression.
+    Fits a GP to spatial data (latitude, longitude) and provides
+    utilities for gradient-based exploration and visualization within a polygonal domain.
     """
-    
-    def __init__(self, domain =  np.array([25.7581572, -80.3734494]), kernel = RBF()):
-        """
-        Initializes the WaterPhenomenonGP with normalization parameters and a kernel for the GP.
 
-        Args:
-            mins (tuple, numpy.array): Minimum coordinates of the domain of interest. (latitude, longitude)
-            maxs (tuple, numpy.array): Maximum coordinates of the domain of interest.
-            kernel (sklearn.gaussian_process.kernels): The kernel to be used by the Gaussian Process.
+    # Precompute rotation angles for _rotate_within_domain
+    _base_angles = np.linspace(0, np.pi, 18, endpoint=False)
+    _rotation_angles = np.empty(36)
+    _rotation_angles[0::2] = _base_angles
+    _rotation_angles[1::2] = -_base_angles
+    _rotations = np.array(
+        [
+            [[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]]
+            for angle in _rotation_angles
+        ]
+    )
+
+    def __init__(self, domain=np.array([[25.7581572, -80.3734494]]), kernel=RBF()):
         """
-        # Extract origin for normalization
+        Args:
+            domain (np.ndarray): Array of coordinates defining the domain polygon (lat, lon).
+            kernel (sklearn.gaussian_process.kernels.Kernel): Kernel for the GP.
+        """
         self.domain = np.atleast_2d(domain)
         self.polygon_coords = np.vstack([self.domain, self.domain[0]])
-        self.origin = np.min(domain, axis = 0)
-        
-        # Initialize the normalizer
+        self.origin = np.min(self.domain, axis=0)
+        self._polygon_path = Path(self.polygon_coords)
         self._normalizer = Normalizer(self.origin)
-        
-        # Initialize the Gaussian Process regressor
-        self._gaussian_process = GaussianProcessRegressor(kernel=kernel,
-                                                          n_restarts_optimizer=5,
-                                                          alpha=1e-5)
-        self._plot_environment = lambda x : self._gaussian_process.predict(self._normalizer.forward(x))
-        # Initialize static variables for the plotting function
-        self._fig = None
-        self._ax = None
-        self._c = None
-        self._path_plt = None
-        self._current_point_plt = None
-    
-    def _tap_gradient(self, x, h=0.001):
-        """
-        Computes the gradient of the GP predictions at point x using finite differences.
-
-        Args:
-            x (numpy.ndarray): The input point where the gradient is to be computed.
-            h (float): The perturbation step size for finite differences (default is 0.001).
-
-        Returns:
-            numpy.ndarray: The gradient vector at point x.
-        """
-        x = x.reshape(1, -1)
-        dim = x.shape[-1]
-        perturbations = h * np.eye(dim)
-        
-        # Compute predictions for perturbed points
-        predictions_plus = self._gaussian_process.predict(x + perturbations)
-        predictions_minus = self._gaussian_process.predict(x - perturbations)
-        
-        # Calculate gradient using central differences
-        grad = (predictions_plus - predictions_minus) / (2 * h)
-        
-        return grad.flatten()
+        self._gaussian_process = GaussianProcessRegressor(
+            kernel=kernel, n_restarts_optimizer=5, alpha=1e-5
+        )
+        self.function_to_plot = lambda x: self._gaussian_process.predict(
+            self._normalizer.forward(x)
+        )
+        self.plotter = WaterPhenomenonPlotter(
+            self.origin, self.domain, self.polygon_coords, self.function_to_plot
+        )
 
     def fit(self, X, y):
         """
-        Fits the Gaussian Process model to the training data.
+        Fit the GP model to training data.
 
         Args:
-            X (numpy.ndarray): The input training data (coordinates).
-            y (numpy.ndarray): The target values corresponding to X.
+            X (np.ndarray): Training coordinates (lat, lon).
+            y (np.ndarray): Target values.
         """
         X = np.asarray(X)
         y = np.asarray(y)
-        
-        # Normalize the input data
-        X_transform = self._normalizer.forward(X)
-        
-        # Fit the GP model
-        self._gaussian_process.fit(X_transform, y)
+        X_norm = self._normalizer.forward(X)
+        self._gaussian_process.fit(X_norm, y)
+
+    def _tap_gradient(self, x, h=0.001):
+        """
+        Estimate the gradient of the GP prediction at x using central finite differences.
+
+        Args:
+            x (np.ndarray): Input point (lat, lon).
+            h (float): Step size for finite differences.
+
+        Returns:
+            np.ndarray: Gradient vector at x.
+        """
+        x = x.reshape(1, -1)
+        dim = x.shape[-1]
+        perturb = h * np.eye(dim)
+        pred_plus = self._gaussian_process.predict(x + perturb)
+        pred_minus = self._gaussian_process.predict(x - perturb)
+        grad = (pred_plus - pred_minus) / (2 * h)
+        return grad.flatten()
 
     def next_point(self, x, lr=1.0):
         """
-        Suggests the next point for analysis based on the gradient of the GP predictions.
+        Suggest the next point by moving in the direction of the GP gradient.
 
         Args:
-            x (numpy.ndarray): The current point (coordinates).
-            lr (float): The learning rate determining the step size in the direction of the gradient (default is 1.0).
+            x (np.ndarray): Current point (lat, lon).
+            lr (float): Step size (learning rate).
 
         Returns:
-            numpy.ndarray: The suggested next point (coordinates).
+            np.ndarray: Next suggested point (lat, lon).
         """
         x_inv = self._normalizer.forward(x)
-        gradient = self._tap_gradient(x_inv)
-        
-        # Determine the direction based on the gradient
-        if norm(gradient) > 1e-4:
-            direction = gradient / norm(gradient)
-        else:
-            print('No movement')
-            direction = np.array([0., 0.])
-        # Compute the next point in the normalized space and transform it back
-        next_point_inv = x_inv + lr * direction
-        next_point = self._normalizer.inverse(next_point_inv)
-        # next_point = self.bounce_within_domain(next_point)
-        next_point = self.rotate_within_domain(direction, x_inv, lr)
-        return next_point
+        grad = self._tap_gradient(x_inv)
+        direction = grad / norm(grad) if norm(grad) > 1e-4 else np.zeros_like(grad)
+        return self._rotate_within_domain(direction, x_inv, lr)
 
-    def bounce_within_domain(self, next_point):
+    def _rotate_within_domain(self, direction, x_inv, lr):
         """
-        Checks if next_point is within the polygon defined by self.polygon_coords.
-        If not, reflects it back inside the polygon along the direction from the centroid.
+        Rotate the direction vector to keep the next point inside the domain polygon.
 
         Args:
-            next_point (np.ndarray): The point to check (latitude, longitude).
+            direction (np.ndarray): Direction vector.
+            x_inv (np.ndarray): Normalized current point.
+            lr (float): Step size.
 
         Returns:
-            np.ndarray: The adjusted point inside the polygon.
+            np.ndarray: Valid next point inside the polygon.
         """
-
-        # Convert polygon coordinates to (lon, lat) for Path
-        polygon_path = Path(np.array(self.polygon_coords)[:, [1, 0]])
-
-        # next_point is (lat, lon); convert to (lon, lat) for checking
-        point = np.array([next_point[1], next_point[0]])
-
-        if polygon_path.contains_point(point):
-            return next_point  # It's already inside
-
-        print('Point is outside the polygon, reflecting back inside.')
-
-        # Compute the centroid of the polygon in (lon, lat)
-        centroid = np.mean(np.array(self.polygon_coords)[:, [1, 0]], axis=0)
-
-        # Direction vector from centroid to point
-        direction = point - centroid
-
-        # Binary search to find the farthest point inside along the direction
-        low, high = 0.0, 1.0
-        for _ in range(20):
-            mid = (low + high) / 2
-            candidate = centroid + direction * mid
-            if polygon_path.contains_point(candidate):
-                low = mid
-            else:
-                high = mid
-
-        # Slightly back inside the polygon
-        reflected = centroid + direction * low * 0.9
-
-        # Return in (lat, lon) order
-        return np.array([reflected[1], reflected[0]])
-    
-    def rotate_within_domain(self, direction, x_inv, lr):
-        """
-        Rotates the direction vector to ensure it stays within the domain polygon.
-
-        Args:
-            direction (np.ndarray): The direction vector to rotate.
-
-        Returns:
-            np.ndarray: The rotated direction vector.
-        """
-        # Convert polygon coordinates to (lon, lat) for Path
-        next_point_inv = x_inv + lr * direction
-        next_point = self._normalizer.inverse(next_point_inv)
-        polygon_path = Path(np.array(self.polygon_coords))
-        if polygon_path.contains_point(next_point):
+        next_norm = x_inv + lr * direction
+        next_point = self._normalizer.inverse(next_norm)
+        if self._polygon_path.contains_point(next_point):
             return next_point
-        print('Point is outside the polygon, rotating direction to find a valid point.')
-        for angle in self.rotate_within_domain.rotation_angles:
-            angle = -angle  # Invert angle to match the direction of rotation
-            print('a',angle*180/np.pi, next_point)
-              # 45 degrees in radians
-            rotation_matrix = np.array([[np.cos(angle), -np.sin(angle)],
-                                    [np.sin(angle), np.cos(angle)]])
-            # Rotate the direction vector by 90 degrees
-            tentative_direction = rotation_matrix @ direction
-            next_point_inv = x_inv + lr * tentative_direction
-            next_point = self._normalizer.inverse(next_point_inv)  
-            if polygon_path.contains_point(next_point):
-                print('Point is inside the polygon after rotation.')
-                break
 
+        rotated_dirs = self._rotations @ direction
+        candidates_norm = x_inv + lr * rotated_dirs
+        candidates = self._normalizer.inverse(candidates_norm)
+        for candidate in candidates:
+            if self._polygon_path.contains_point(candidate):
+                return candidate
 
-        return next_point
-    # Interleave positive and negative angles for rotation
-    base_angles = np.linspace(0, np.pi, 18, endpoint=False)
-    angles = np.empty(36)
-    angles[0::2] = base_angles
-    angles[1::2] = -base_angles
-    rotate_within_domain.rotation_angles = angles
-    
-    def plot_initialization(self, delta=0.00015,
-                        plot_args={'marker': 'x', 'color': 'black'},
-                        contourf_args={'cmap': 'jet', 'alpha': 0.5, 'levels' : 15}):
-        min_lat, min_lon = self.origin
-        max_lat, max_lon = np.max(self.domain, axis= 0)
-        self._lat_grid, self._lon_grid = np.meshgrid(np.linspace(min_lat, max_lat, 100), np.linspace(min_lon, max_lon, 100))
-        self._mesh_points = np.column_stack((self._lat_grid.ravel(), self._lon_grid.ravel()))
+        return self._normalizer.inverse(
+            x_inv
+        )  # Fallback to the original point if no valid rotation found
 
-        # Initialize the map with satellite imagery if not already initialized
-        if self._fig is None or self._ax is None:
-            tiler = cimgt.GoogleTiles(style='satellite')
-            transform = ccrs.PlateCarree()
-            self._fig, self._ax = plt.subplots(figsize=(8, 10), subplot_kw={'projection': transform})
-            self._ax.add_image(tiler, 20)
-            self._ax.set_aspect('equal', adjustable='box')
-            gl = self._ax.gridlines(draw_labels=True)
-            gl.top_labels = False
-            gl.right_labels = False
-
-        # Set the extent of the map with a margin
-        self._ax.set_extent([min_lon - delta, max_lon + delta, min_lat - delta, max_lat + delta], crs=ccrs.PlateCarree())
-        self._path_plt,  = self._ax.plot([],[], transform=ccrs.PlateCarree(), label = 'current path', **plot_args)
-        self._current_point_plt = self._ax.scatter([0], [0], transform=ccrs.PlateCarree(), label='Next point', color='red',zorder=10)
-        # Plot the domain polygon
-
-        # Ensure domain is a closed polygon
-        
-        self.poly = Polygon(self.polygon_coords[:, [1, 0]], closed=True, edgecolor='orange', facecolor='none', linewidth=2, zorder=5, label='Domain')
-        self._ax.add_patch(self.poly)
-
-
-    def plot_env_and_path(self, path, next_point):
+    def update_plot(self, path, next_point):
         """
-        Plots the interpolated environment data and the path on a satellite image.
+        Update the plot with the current path and next point.
 
-        Parameters:
-        - environment: Callable
-            Function to evaluate the environment at given coordinates (latitude, longitude).
-        - path: np.ndarray
-            Array of coordinates representing the path (shape: [n_points, 2]).
-        - extent: tuple
-            Tuple specifying the extent of the plot (min_lat, min_lon, max_lat, max_lon).
-        - delta: float, optional
-            Margin to add around the extent for better visualization (default is 0.00015).
-        - plot_args: dict, optional
-            Additional arguments for the path plot (default is empty dict).
-        - contourf_args: dict, optional
-            Additional arguments for the contour plot (default is empty dict).
-
-        Returns:
-        - None
+        Args:
+            path (np.ndarray): Array of visited coordinates (lat, lon).
+            next_point (np.ndarray): Next suggested point (lat, lon).
         """
-
-        # Evaluate the environment function on the meshgrid points
-        interpolated_values = self._plot_environment(self._mesh_points).reshape(self._lat_grid.shape)
-
-        # Plot the interpolated environment values as contours
-        try:
-            self._c.remove()  
-            # for c in self._c.collections:
-            #     c.remove()
-        except:
-            print('failed to remove previous contours')
-            pass
-        self._c = self._ax.contourf(self._lon_grid, self._lat_grid, interpolated_values, transform=ccrs.PlateCarree())
-        self._c.set_clip_path(self.poly)
-        # print('mean value of the environment:', np.mean(interpolated_values))
-        # Update the path plot data
-        self._path_plt.set_xdata(path[:-1, 1])  # Update x data
-        self._path_plt.set_ydata(path[:-1, 0])  # Update y data
-        
-        # Update the current point plot data
-        next_point = np.asarray([[next_point[1], next_point[0]]])
-        self._current_point_plt.set_offsets(next_point)  # Update position of the scatter point
-
-        self._ax.legend()
-        plt.draw()
-        plt.pause(0.1)
+        self.plotter.plot_env_and_path(path, next_point)
 
 
-if __name__ == '__main__':
-    # Example
+if __name__ == "__main__":
+    # Example usage
     kernel = RBF()
-    X = np.array([
-    [25.7617, -80.1918],  # Miami Downtown
-    [25.7618, -80.1917],  # 10 meters north-east
-    [25.7616, -80.1919],  # 10 meters south-west
-    [25.7617, -80.1919],  # 10 meters west
-    [25.7618, -80.1918]   # 10 meters north
-    ], dtype = np.float64)
-
-    # Example temperature values (randomly generated)
+    X = np.array(
+        [
+            [25.7617, -80.1918],
+            [25.7618, -80.1917],
+            [25.7616, -80.1919],
+            [25.7617, -80.1919],
+            [25.7618, -80.1918],
+        ],
+        dtype=np.float64,
+    )
     y = np.random.uniform(25, 30, size=5)
-
-    water_feature = WaterPhenomenonGP(X, kernel)
-
-    water_feature.fit(X,y)
+    domain = np.array(
+        [
+            [25.7615, -80.1920],
+            [25.7620, -80.1920],
+            [25.7620, -80.1915],
+            [25.7615, -80.1915],
+        ]
+    )
+    water_feature = WaterPhenomenonGP(domain, kernel)
+    water_feature.fit(X, y)

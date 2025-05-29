@@ -1,14 +1,13 @@
-import time
-import threading
 import random
-from geopy.distance import geodesic
+import threading
+import time
+
 import numpy as np
+from geopy.distance import geodesic
 
 
 def mock_ODO_generator(maximum_location=(0, 0), max_value=100, min_value=50, decay=0.1):
-    """
-
-    """
+    """ """
 
     def mock_ODO(x):
         """
@@ -18,7 +17,9 @@ def mock_ODO_generator(maximum_location=(0, 0), max_value=100, min_value=50, dec
         value = min_value + (max_value - min_value) * np.exp(-decay * distance)
         print(x, value)
         return value
+
     return mock_ODO
+
 
 class MockSurveyor:
     def __init__(self, current_location, odo_source=(25.9131415, -80.1380754)):
@@ -32,9 +33,11 @@ class MockSurveyor:
         print(f"MockSurveyor initialized at {self.current_location}.")
         self.control_mode = "Station Keep"
         self._moving = False
-        self._odo_gen = mock_ODO_generator(maximum_location=odo_source, max_value=100, min_value=50, decay=0.0001)
+        self._odo_gen = mock_ODO_generator(
+            maximum_location=odo_source, max_value=100, min_value=50, decay=0.0001
+        )
 
-    def get_data(self):
+    def _get_data(self):
         """
         Get mock data including ODO (%Sat), Temperature, and coordinates.
 
@@ -43,10 +46,38 @@ class MockSurveyor:
         """
         return {
             "ODO (%Sat)": self._odo_gen(self.current_location),
-            "Temperature": round(random.uniform(15, 30), 2),
+            "Temperature (C)": round(random.uniform(15, 30), 2),
+            "Chlorophyll (ug/L)": round(random.uniform(0, 10), 2),
+            "Turbidity (NTU)": round(random.uniform(0, 5), 2),
             "Latitude": self.current_location[0],
-            "Longitude": self.current_location[1]
+            "Longitude": self.current_location[1],
+            "Date": time.strftime("%Y%m%d"),
+            "Time": time.strftime("%H%M%S"),
+            "Velocity": 0.0,  # Mock velocity
+            "Heading": 0.0,  # Mock heading,
+            "Acceleration": 0.0,  # Mock acceleration
         }
+
+    def get_data(self, list):
+        data_dict = {}
+        data = self._get_data()
+        for list_item in list:
+            if list_item == "exo2":
+                data_dict["ODO (%Sat)"] = data["ODO (%Sat)"]
+                data_dict["Temperature (C)"] = data["Temperature (C)"]
+                data_dict["Chlorophyll (ug/L)"] = data["Chlorophyll (ug/L)"]
+                data_dict["Turbidity (NTU)"] = data["Turbidity (NTU)"]
+            elif list_item == "state":
+                for key in data:
+                    if key not in [
+                        "ODO (%Sat)",
+                        "Temperature (C)",
+                        "Chlorophyll (ug/L)",
+                        "Turbidity (NTU)",
+                    ]:
+                        data_dict[key] = data[key]
+        return data_dict
+
     def get_gps_coordinates(self):
         """
         Get the current GPS coordinates of the boat.
@@ -85,11 +116,15 @@ class MockSurveyor:
         radius = 2  # meters
         while True:
             # print('moving')
-            if getattr(self, 'control_mode', None) == "Waypoint" and hasattr(self, 'waypoint'):
-                speed = getattr(self, 'THROTTLE', 0) / 20  # meters per second
+            if getattr(self, "control_mode", None) == "Waypoint" and hasattr(
+                self, "waypoint"
+            ):
+                speed = getattr(self, "THROTTLE", 0) / 20  # meters per second
                 distance = geodesic(self.current_location, self.waypoint).meters
                 if distance <= radius:
-                    print(f"Reached waypoint {self.current_location}. {distance} meters away.")
+                    print(
+                        f"Reached waypoint {self.current_location}. {distance} meters away."
+                    )
                     self.control_mode = "Station Keep"
                 else:
                     direction = self.waypoint - self.current_location
@@ -102,7 +137,7 @@ class MockSurveyor:
         Start the move loop in a background thread.
         """
         # print("Starting MockSurveyor move loop.", self._move_thread)
-        if not hasattr(self, '_move_thread'):
+        if not hasattr(self, "_move_thread"):
             self._move_thread = threading.Thread(target=self._move_loop, daemon=True)
             self._move_thread.start()
 
@@ -114,17 +149,17 @@ class MockSurveyor:
             str: Current control mode.
         """
         return self.control_mode
-    
-    def __enter__(self):
-            """
-            Enter the context manager.
 
-            Returns:
-                MockSurveyor: The instance of the MockSurveyor.
-            """
-            print("MockSurveyor initialized.")
-            self.start()
-            return self
+    def __enter__(self):
+        """
+        Enter the context manager.
+
+        Returns:
+            MockSurveyor: The instance of the MockSurveyor.
+        """
+        print("MockSurveyor initialized.")
+        self.start()
+        return self
 
     def __exit__(self, exc_type, exc_value, traceback):
         """

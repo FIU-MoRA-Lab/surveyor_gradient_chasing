@@ -1,5 +1,6 @@
 import os
 import sys
+
 import pandas as pd
 
 
@@ -17,7 +18,7 @@ def extract_and_save_coordinates(filepath):
     filename = os.path.splitext(os.path.basename(filepath))[0]
 
     # Construct the output path
-    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..',  'out'))
+    output_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "out"))
     output_filename = os.path.join(output_dir, f"{filename}.csv")
 
     # Load the APM mission file into a DataFrame
@@ -32,6 +33,7 @@ def extract_and_save_coordinates(filepath):
     gps_df.to_csv(output_filename, index=False, header=["Latitude", "Longitude"])
 
     return output_filename
+
 
 def main(filepath):
     output_file = extract_and_save_coordinates(filepath)
