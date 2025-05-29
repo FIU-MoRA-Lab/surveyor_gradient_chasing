@@ -9,13 +9,14 @@ import numpy as np
 from geopy.distance import geodesic
 from sklearn.gaussian_process.kernels import DotProduct, Matern
 import matplotlib.pyplot as plt
-from mock_surveyor import MockSurveyor 
+from test.mock_surveyor import MockSurveyor 
 
 
 # Global Variables
 DATA = pd.DataFrame()
 THROTTLE = 20
 FEATURE_TO_CHASE = 'ODO (%Sat)'
+IS_SIMULATION = True  
 
 
 def allocate_data_df(boat):
@@ -104,8 +105,14 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
     kernel = 10 * Matern(nu=0.5, length_scale_bounds=(1e-2, 1e5)) + 1e-2 * DotProduct() ** 1
     water_feature_gp = water_phenomenon.WaterPhenomenonGP(extent_coordinates, kernel)
 
-    # boat = surveyor.Surveyor()
-    boat = MockSurveyor(erp[0])
+    if IS_SIMULATION:
+        print('Running in simulation mode.')
+        # boat = surveyor.Surveyor(is_simulation=True)
+        boat = MockSurveyor(erp[0])
+    else:
+        sensors_to_use = ['exo2']
+        boat = surveyor.Surveyor(sensors_to_use=sensors_to_use)
+
     print(initial_waypoints)
     
     print(f'{len(initial_waypoints)} initial waypoints')
