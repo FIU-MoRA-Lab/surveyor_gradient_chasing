@@ -3,6 +3,8 @@ import sys
 
 import pandas as pd
 
+# Note: This script is not meant to be imported.
+
 
 def extract_and_save_coordinates(filepath):
     """

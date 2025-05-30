@@ -9,7 +9,7 @@ PARAMS_DICT_REVERSED = {v: str(k) for k, v in PARAMS_DICT.items()}
 
 # MongoDB connection setup
 API_KEY = (
-    'your key here' 
+    "your_mongodb_connection_string_here"  # Replace with your MongoDB connection string
 )
 client = pymongo.MongoClient(API_KEY)
 db = client["missions"]
@@ -39,13 +39,13 @@ def send_to_mongo(boat, asvid, mission_postfix=""):
         "time": boat_data.pop("Time"),
         "longitude": boat_data.pop("Longitude"),
         "latitude": boat_data.pop("Latitude"),
+        "timestamp": datetime.now(timezone.utc),
         "exodata": {PARAMS_DICT_REVERSED[k]: v for k, v in exo_data.items()},
         "metadata": {**boat_data, "asvid": asvid},
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec='milliseconds'),
     }
 
     collection.insert_one(data)
-    print(f"Data sent to MongoDB successfully to missions/{collection_name}.")
+    # print(f"Data sent to MongoDB successfully to missions/{collection_name}.")
 
 
 # Default postfix for mission data

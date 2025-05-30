@@ -15,14 +15,13 @@ def mock_ODO_generator(maximum_location=(0, 0), max_value=100, min_value=50, dec
         """
         distance = geodesic(maximum_location, x).meters
         value = min_value + (max_value - min_value) * np.exp(-decay * distance)
-        print(x, value)
         return value
 
     return mock_ODO
 
 
 class MockSurveyor:
-    def __init__(self, current_location, odo_source=(25.9131415, -80.1380754)):
+    def __init__(self, current_location, odo_source=(25.9126132, -80.1377897)):
         """
         Initialize the MockSurveyor with the current location.
 
@@ -54,7 +53,7 @@ class MockSurveyor:
             "Date": time.strftime("%Y%m%d"),
             "Time": time.strftime("%H%M%S"),
             "Velocity": 0.0,  # Mock velocity
-            "Heading": 0.0,  # Mock heading,
+            "Heading": round(random.uniform(0, 360), 2),  # Mock heading
             "Acceleration": 0.0,  # Mock acceleration
         }
 
@@ -97,7 +96,7 @@ class MockSurveyor:
             THROTTLE (int): Speed of the boat.
         """
         self.waypoint = np.array(waypoint)
-        print(f"Setting waypoint to {self.waypoint}.")
+        # print(f"Setting waypoint to {self.waypoint}.")
         self.THROTTLE = THROTTLE
         print(f"Setting waypoint to {self.waypoint} with throttle {self.THROTTLE}.")
         if self.control_mode != "Waypoint":

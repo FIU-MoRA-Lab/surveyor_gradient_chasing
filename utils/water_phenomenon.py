@@ -125,7 +125,7 @@ class WaterPhenomenonGP:
             x_inv
         )  # Fallback to the original point if no valid rotation found
 
-    def update_plot(self, path, next_point):
+    def update_plot(self, path, next_point, heading=0.0):
         """
         Update the plot with the current path and next point.
 
@@ -133,7 +133,7 @@ class WaterPhenomenonGP:
             path (np.ndarray): Array of visited coordinates (lat, lon).
             next_point (np.ndarray): Next suggested point (lat, lon).
         """
-        self.plotter.plot_env_and_path(path, next_point)
+        self.plotter.plot_env_and_path(path, next_point, heading)
 
 
 if __name__ == "__main__":

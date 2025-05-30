@@ -2,29 +2,28 @@ import argparse
 import logging
 import sys
 import time
+import warnings
 from test import mock_surveyor
 
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 from geopy.distance import geodesic
+from sklearn.exceptions import ConvergenceWarning
 from sklearn.gaussian_process.kernels import DotProduct, Matern
 from tqdm import tqdm
 
-import gradient_chasing_utils.send_data
 import surveyor_library.surveyor_lib.helpers as hlp
 import surveyor_library.surveyor_lib.surveyor as surveyor
-from gradient_chasing_utils import water_phenomenon
+import utils.send_data_utils
+from utils import water_phenomenon
+
+warnings.filterwarnings("ignore", category=ConvergenceWarning)
+
 
 # Global Variables
-DATA = pd.DataFrame()
-THROTTLE = 20
-FEATURE_TO_CHASE = "ODO (%Sat)"
-IS_SIMULATION = True
-ASVID = 16
-NUM_WAYPOINTS = 30
-STEP_SIZE = 5.0
-SEND_TO_MONGO = True
+from config import (ASVID, DATA, FEATURE_TO_CHASE, IS_SIMULATION,
+                    NUM_WAYPOINTS, SEND_TO_MONGO, STEP_SIZE, THROTTLE)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -53,11 +52,25 @@ def countdown(count, message):
     print()
 
 
+def initialize_boat(erp):
+    if IS_SIMULATION:
+        logging.info("Running in simulation mode.")
+        return mock_surveyor.MockSurveyor(erp[0])
+    else:
+        sensors_to_use = ["exo2"]
+        sensors_config = {"exo2": {"exo2_server_ip": "192.168.0.20"}}
+        return surveyor.Surveyor(
+            sensors_to_use=sensors_to_use, sensors_config=sensors_config
+        )
+
+
 def plot_caller(boat, water_phenomenon, next_point):
     """Plot the current GPS coordinates and the next point."""
     current_coordinates = np.asarray(boat.get_gps_coordinates())
     plot_caller.coordinates = np.vstack((plot_caller.coordinates, current_coordinates))
-    water_phenomenon.update_plot(plot_caller.coordinates, next_point)
+    water_phenomenon.update_plot(
+        plot_caller.coordinates, next_point, boat.get_data(["state"]).get("Heading", 0)
+    )
     return plot_caller.coordinates[-1]
 
 
@@ -77,7 +90,7 @@ def data_updater(boat, mission_postfix=""):
     DATA = pd.concat([DATA, pd.DataFrame([data_dict])])
     hlp.save(data_dict, mission_postfix)
     if SEND_TO_MONGO:
-        gradient_chasing_utils.send_data.send_to_mongo(
+        utils.send_data_utils.send_to_mongo(
             boat, asvid=ASVID, mission_postfix=mission_postfix
         )
 
@@ -97,6 +110,27 @@ def next_waypoint(water_feature_gp, step_size=4.0):
     y = np.asarray(DATA[FEATURE_TO_CHASE])
     water_feature_gp.fit(X, y)
     return water_feature_gp.next_point(X[-1], step_size)
+
+
+def process_waypoint(boat, water_feature_gp, waypoint, mission_postfix="", delay=0.5):
+    """
+    Process a single waypoint: update plot, log information, and send data to MongoDB if enabled.
+
+    Args:
+        boat: The boat object.
+        water_feature_gp: The water phenomenon Gaussian Process object.
+        waypoint (tuple): The current waypoint (lat, lon).
+        mission_postfix (str): Optional postfix for mission-specific data saving.
+    """
+    current_coordinates = plot_caller(boat, water_feature_gp, waypoint)
+    logging.info(
+        f"Waypoint {waypoint}. Distance {geodesic(current_coordinates, waypoint).meters:.3f}"
+    )
+    if SEND_TO_MONGO:
+        utils.send_data_utils.send_to_mongo(
+            boat, asvid=ASVID, mission_postfix=mission_postfix
+        )
+    time.sleep(delay)
 
 
 def main(filename, erp_filename, extent_filename, mission_postfix=""):
@@ -124,62 +158,38 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
 
     boat = initialize_boat(erp)
 
-    print(initial_waypoints)
-
-    print(f"{len(initial_waypoints)} initial waypoints")
+    logging.info(f"Initial mission has {len(initial_waypoints)} waypoints")
 
     with boat:
         # start_mission(boat)
         water_feature_gp.plotter.plot_initialization(delta=0.00015)
 
-        for initial_waypoint in initial_waypoints:
+        for initial_waypoint in tqdm(
+            initial_waypoints, desc="Initial Collection Progress"
+        ):
             boat.go_to_waypoint(initial_waypoint, erp, THROTTLE)
 
             while boat.get_control_mode() == "Waypoint":
-                current_coordinates = plot_caller(
-                    boat, water_feature_gp, initial_waypoint
+                process_waypoint(
+                    boat, water_feature_gp, initial_waypoint, mission_postfix, 0.5
                 )
-                print(
-                    f"Initial collection mission waypoint {initial_waypoint}. "
-                    f"Distance {geodesic(current_coordinates, initial_waypoint).meters:.3f}",
-                    end="\r",
-                )
-                time.sleep(0.05)
 
             data_updater(
                 boat, mission_postfix=mission_postfix
             )  # Finished, getting data
 
-        print("Starting gradient chasing")
+        print("Starting gradient tracking mission...")
         for i in tqdm(range(NUM_WAYPOINTS), desc="Gradient Chasing Progress"):
             waypoint = next_waypoint(water_feature_gp, step_size=STEP_SIZE)
-            print(f"Loading waypoint {i + 1}")
+            logging.info(f"Loading waypoint {i + 1}")
             boat.go_to_waypoint(waypoint, erp, THROTTLE)
 
             while boat.get_control_mode() == "Waypoint":
-                current_coordinates = plot_caller(boat, water_feature_gp, waypoint)
-                print(
-                    f"Navigating to waypoint {i + 1}. From {current_coordinates} to {waypoint} "
-                    f"Distance {geodesic(current_coordinates, waypoint).meters:.3f}",
-                    end="\r",
-                )
-                time.sleep(0.05)
+                process_waypoint(boat, water_feature_gp, waypoint, mission_postfix, 0.5)
 
             logging.info(f"Arrived at waypoint {i + 1}.")
             data_updater(boat, mission_postfix=mission_postfix)
         plt.show()  # Show the plot after the mission ends
-
-
-def initialize_boat(erp):
-    if IS_SIMULATION:
-        logging.info("Running in simulation mode.")
-        return mock_surveyor.MockSurveyor(erp[0])
-    else:
-        sensors_to_use = ["exo2"]
-        sensors_config = {"exo2": {"exo2_server_ip": "192.168.0.20"}}
-        return surveyor.Surveyor(
-            sensors_to_use=sensors_to_use, sensors_config=sensors_config
-        )
 
 
 if __name__ == "__main__":
