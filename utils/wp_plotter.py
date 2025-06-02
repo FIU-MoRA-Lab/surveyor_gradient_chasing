@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from matplotlib.patches import FancyArrow, Polygon
 from mpl_toolkits.axes_grid1 import make_axes_locatable
+import pygeomag 
 
 from .normalizer import LATITUDE_TO_METERS
 
@@ -26,7 +27,7 @@ class WaterPhenomenonPlotter:
         self.domain = domain
         self.polygon_coords = polygon_coords
         self.function_to_call = function_to_call
-        self.water_feature = water_feature
+        self.water_feature_name = water_feature
 
         self._asvid = asvid
         self._figure = None
@@ -38,6 +39,7 @@ class WaterPhenomenonPlotter:
         self._lat_grid = None
         self._lon_grid = None
         self._mesh_points = None
+        self._gm = pygeomag.GeoMag()
 
     def get_plot_arrow(self, x=0, y=0, angle=0, length=1.5, arrow_kwargs=None):
         """
@@ -153,7 +155,34 @@ class WaterPhenomenonPlotter:
         self._colorbar = self._figure.colorbar(
             self._contour, cax=self._cax, orientation="vertical"
         )
+        self._axis.set_title(
+            f"{self.water_feature_name} - ASV {self._asvid}",
+            fontsize=14,
+        )
         self._axis.legend()
+
+    def magnetic_to_true_heading(self, latitude, longitude, magnetic_heading):
+        """
+        Convert magnetic heading to true heading based on location.
+
+        Parameters:
+            latitude (float): Latitude in degrees
+            longitude (float): Longitude in degrees
+            magnetic_heading (float): Magnetic heading in degrees (0-359)
+
+        Returns:
+            float: True heading in degrees (0-359)
+        """
+        
+        mag_field = self._gm.calculate(latitude, longitude, alt=0, time=2025)  # altitude in meters
+        declination = mag_field.d  # magnetic declination in degrees
+
+        true_heading = magnetic_heading + declination
+
+        # Normalize to 0-359 degrees
+        true_heading = true_heading % 360
+
+        return true_heading
 
     def plot_env_and_path(
         self, path: np.ndarray, next_point: np.ndarray, current_heading: float = 0.0
@@ -185,7 +214,7 @@ class WaterPhenomenonPlotter:
         current_arrow = self.get_plot_arrow(
             x=path[-1, 1],
             y=path[-1, 0],
-            angle=current_heading,
+            angle=self.magnetic_to_true_heading(path[-1, 0], path[-1, 1], current_heading) + 90,
         )
         self._current_point = self._axis.add_patch(current_arrow)
         # self._current_point.set_offsets([[path[-1, 1], path[-1, 0]]])

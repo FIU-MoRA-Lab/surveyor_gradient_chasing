@@ -28,7 +28,8 @@ class WaterPhenomenonGP:
         ]
     )
 
-    def __init__(self, domain=np.array([[25.7581572, -80.3734494]]), kernel=RBF()):
+    def __init__(self, domain=np.array([[25.7581572, -80.3734494]]), kernel=RBF(),
+                water_feature_name="Water Phenomenon", asvid=16):
         """
         Args:
             domain (np.ndarray): Array of coordinates defining the domain polygon (lat, lon).
@@ -37,6 +38,8 @@ class WaterPhenomenonGP:
         self.domain = np.atleast_2d(domain)
         self.polygon_coords = np.vstack([self.domain, self.domain[0]])
         self.origin = np.min(self.domain, axis=0)
+        self.water_feature_name = water_feature_name
+        self.asvid = asvid
         self._polygon_path = Path(self.polygon_coords)
         self._normalizer = Normalizer(self.origin)
         self._gaussian_process = GaussianProcessRegressor(
@@ -46,7 +49,8 @@ class WaterPhenomenonGP:
             self._normalizer.forward(x)
         )
         self.plotter = WaterPhenomenonPlotter(
-            self.origin, self.domain, self.polygon_coords, self.function_to_plot
+            self.origin, self.domain, self.polygon_coords,
+            self.function_to_plot, self.asvid, self.water_feature_name
         )
 
     def fit(self, X, y):

@@ -2,12 +2,10 @@ Cartopy==0.24.1
 Flask==3.1.1
 geopy==2.4.1
 h5py==3.13.0
-h5py==3.12.1
 matplotlib==3.10.3
 numpy==2.2.6
 opencv_python==4.11.0.86
 pandas==2.2.3
-picamera2==0.3.27
 Pillow==11.2.1
 PyKrige==1.7.2
 pymongo==4.13.0
@@ -18,3 +16,4 @@ Requests==2.32.3
 rplidar==0.9.2
 scikit_learn==1.6.1
 tqdm==4.67.1
+geomag

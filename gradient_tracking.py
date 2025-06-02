@@ -23,7 +23,8 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 # Global Variables
 from config import (ASVID, DATA, FEATURE_TO_CHASE, IS_SIMULATION,
-                    NUM_WAYPOINTS, SEND_TO_MONGO, STEP_SIZE, THROTTLE)
+                    NUM_WAYPOINTS, SEND_TO_MONGO, STEP_SIZE, THROTTLE,
+                    PATH_PLOT_ARGS, CONTOURF_ARGS)
 
 logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
@@ -69,7 +70,7 @@ def plot_caller(boat, water_phenomenon, next_point):
     current_coordinates = np.asarray(boat.get_gps_coordinates())
     plot_caller.coordinates = np.vstack((plot_caller.coordinates, current_coordinates))
     water_phenomenon.update_plot(
-        plot_caller.coordinates, next_point, boat.get_data(["state"]).get("Heading", 0)
+        plot_caller.coordinates, next_point, boat.get_data(["state"]).get("Heading (degrees Magnetic)", 0)
     )
     return plot_caller.coordinates[-1]
 
@@ -162,7 +163,7 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
 
     with boat:
         # start_mission(boat)
-        water_feature_gp.plotter.plot_initialization(delta=0.00015)
+        water_feature_gp.plotter.plot_initialization(delta=0.00015, plot_args=PATH_PLOT_ARGS,contourf_args=CONTOURF_ARGS)
 
         for initial_waypoint in tqdm(
             initial_waypoints, desc="Initial Collection Progress"

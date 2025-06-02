@@ -53,8 +53,8 @@ class MockSurveyor:
             "Date": time.strftime("%Y%m%d"),
             "Time": time.strftime("%H%M%S"),
             "Velocity": 0.0,  # Mock velocity
-            "Heading": round(random.uniform(0, 360), 2),  # Mock heading
-            "Acceleration": 0.0,  # Mock acceleration
+            "Heading (degrees Magnetic)": round(random.uniform(0, 90), 2),  # Mock heading
+            "Acceleration x, forward (G)": 0.0,  # Mock acceleration
         }
 
     def get_data(self, list):
