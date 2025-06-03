@@ -9,7 +9,7 @@ PARAMS_DICT_REVERSED = {v: str(k) for k, v in PARAMS_DICT.items()}
 
 # MongoDB connection setup
 API_KEY = (
-    "your_mongodb_connection_string_here"  # Replace with your MongoDB connection string
+    "your apikey"  # Replace with your MongoDB connection string
 )
 client = pymongo.MongoClient(API_KEY)
 db = client["missions"]
@@ -25,7 +25,7 @@ def send_to_mongo(boat, asvid, mission_postfix=""):
         mission_postfix: Optional postfix for collection name.
     """
     postfix = send_to_mongo.postfix
-    collection_name = f"mission_{postfix}"
+    collection_name = f"{postfix}"
     if mission_postfix:
         collection_name += f"_{mission_postfix}"
     collection = db[collection_name]
@@ -33,6 +33,7 @@ def send_to_mongo(boat, asvid, mission_postfix=""):
     # Gather data
     exo_data = boat.get_data(["exo2"])
     boat_data = boat.get_data(["state"])
+    print(exo_data, '------', boat_data)
 
     data = {
         "date": boat_data.pop("Date"),

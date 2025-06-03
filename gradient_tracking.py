@@ -1,5 +1,4 @@
 import argparse
-import logging
 import sys
 import time
 import warnings
@@ -26,10 +25,6 @@ from config import (ASVID, DATA, FEATURE_TO_CHASE, IS_SIMULATION,
                     NUM_WAYPOINTS, SEND_TO_MONGO, STEP_SIZE, THROTTLE,
                     PATH_PLOT_ARGS, CONTOURF_ARGS)
 
-logging.basicConfig(
-    level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
-)
-
 
 def start_mission(boat):
     """Start the mission by waiting for the operator to switch to waypoint mode."""
@@ -55,11 +50,11 @@ def countdown(count, message):
 
 def initialize_boat(erp):
     if IS_SIMULATION:
-        logging.info("Running in simulation mode.")
+        print("Running in simulation mode.")
         return mock_surveyor.MockSurveyor(erp[0])
     else:
         sensors_to_use = ["exo2"]
-        sensors_config = {"exo2": {"exo2_server_ip": "192.168.0.20"}}
+        sensors_config = {"exo2": {"server_ip": "192.168.0.20"}}
         return surveyor.Surveyor(
             sensors_to_use=sensors_to_use, sensors_config=sensors_config
         )
@@ -77,8 +72,17 @@ def plot_caller(boat, water_phenomenon, next_point):
 
 plot_caller.coordinates = np.empty((0, 2))
 
+def save_and_send_data(boat, mission_postfix=""):
+    
+    hlp.save(boat.get_data(["exo2", "state"]), mission_postfix)
+    if SEND_TO_MONGO:
+        utils.send_data_utils.send_to_mongo(
+            boat, asvid=ASVID, mission_postfix=mission_postfix
+        )
+
 
 def data_updater(boat, mission_postfix=""):
+    
     """
     Update global DATA with new information from the boat.
 
@@ -89,11 +93,7 @@ def data_updater(boat, mission_postfix=""):
     global DATA
     data_dict = boat.get_data(["exo2", "state"])
     DATA = pd.concat([DATA, pd.DataFrame([data_dict])])
-    hlp.save(data_dict, mission_postfix)
-    if SEND_TO_MONGO:
-        utils.send_data_utils.send_to_mongo(
-            boat, asvid=ASVID, mission_postfix=mission_postfix
-        )
+    save_and_send_data(boat, mission_postfix)
 
 
 def next_waypoint(water_feature_gp, step_size=4.0):
@@ -124,13 +124,10 @@ def process_waypoint(boat, water_feature_gp, waypoint, mission_postfix="", delay
         mission_postfix (str): Optional postfix for mission-specific data saving.
     """
     current_coordinates = plot_caller(boat, water_feature_gp, waypoint)
-    logging.info(
-        f"Waypoint {waypoint}. Distance {geodesic(current_coordinates, waypoint).meters:.3f}"
+    print(
+        f"Waypoint {waypoint}. Distance {geodesic(current_coordinates, waypoint).meters:.3f}", end='\r'
     )
-    if SEND_TO_MONGO:
-        utils.send_data_utils.send_to_mongo(
-            boat, asvid=ASVID, mission_postfix=mission_postfix
-        )
+    save_and_send_data(boat, mission_postfix)
     time.sleep(delay)
 
 
@@ -144,10 +141,10 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
         extent_filename (str): The filename of the extent coordinates CSV.
         mission_postfix (str): Optional postfix for mission-specific data saving.
     """
-    logging.info(
+    print(
         f"Reading waypoints from {filename}, ERP from {erp_filename}, and extent coordinates from {extent_filename}"
     )
-    initial_waypoints = hlp.read_csv_into_tuples(filename)
+    initial_waypoints = np.asarray(hlp.read_csv_into_tuples(filename))
     erp = hlp.read_csv_into_tuples(erp_filename)
     extent_coordinates = np.loadtxt(extent_filename, delimiter=",", skiprows=1)
 
@@ -159,7 +156,7 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
 
     boat = initialize_boat(erp)
 
-    logging.info(f"Initial mission has {len(initial_waypoints)} waypoints")
+    print(f"Initial mission has {len(initial_waypoints)} waypoints")
 
     with boat:
         # start_mission(boat)
@@ -182,13 +179,13 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
         print("Starting gradient tracking mission...")
         for i in tqdm(range(NUM_WAYPOINTS), desc="Gradient Chasing Progress"):
             waypoint = next_waypoint(water_feature_gp, step_size=STEP_SIZE)
-            logging.info(f"Loading waypoint {i + 1}")
+            print(f"Loading waypoint {i + 1}")
             boat.go_to_waypoint(waypoint, erp, THROTTLE)
 
             while boat.get_control_mode() == "Waypoint":
                 process_waypoint(boat, water_feature_gp, waypoint, mission_postfix, 0.5)
 
-            logging.info(f"Arrived at waypoint {i + 1}.")
+            print(f"Arrived at waypoint {i + 1}.")
             data_updater(boat, mission_postfix=mission_postfix)
         plt.show()  # Show the plot after the mission ends
 
@@ -220,5 +217,5 @@ if __name__ == "__main__":
             args.filename, args.erp_filename, args.extent_filename, args.mission_postfix
         )
     except KeyboardInterrupt:
-        logging.info("Mission interrupted by user.")
+        print("Mission interrupted by user.")
         sys.exit(0)
