@@ -21,7 +21,7 @@ def mock_ODO_generator(maximum_location=(0, 0), max_value=100, min_value=50, dec
 
 
 class MockSurveyor:
-    def __init__(self, current_location, odo_source=(25.9126132, -80.1377897)):
+    def __init__(self, current_location, odo_source=(25.913112, -80.138074)):
         """
         Initialize the MockSurveyor with the current location.
 
@@ -129,7 +129,7 @@ class MockSurveyor:
                     direction = self.waypoint - self.current_location
                     direction /= np.linalg.norm(direction)
                     self.current_location += direction * (speed / 111139)
-            time.sleep(1)
+            time.sleep(.1)
 
     def start(self):
         """

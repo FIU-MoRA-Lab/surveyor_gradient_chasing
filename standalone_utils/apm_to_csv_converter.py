@@ -24,7 +24,7 @@ def extract_and_save_coordinates(filepath):
     output_filename = os.path.join(output_dir, f"{filename}.csv")
 
     # Load the APM mission file into a DataFrame
-    df = pd.read_csv(filepath, delim_whitespace=True, header=None, skiprows=1)
+    df = pd.read_csv(filepath, sep="\s+", header=None, skiprows=1)
 
     # Extract the columns with the GPS coordinates (assuming columns 8 and 9 are lat and lon)
     gps_df = df[[8, 9]]

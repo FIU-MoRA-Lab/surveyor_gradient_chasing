@@ -176,7 +176,6 @@ class WaterPhenomenonPlotter:
         
         mag_field = self._gm.calculate(latitude, longitude, alt=0, time=2025)  # altitude in meters
         declination = mag_field.d  # magnetic declination in degrees
-
         true_heading = magnetic_heading + declination
 
         # Normalize to 0-359 degrees

@@ -1,13 +1,10 @@
-import pandas as pd
-
-DATA = pd.DataFrame()
 THROTTLE = 20
 FEATURE_TO_CHASE = "ODO (%Sat)"
-IS_SIMULATION = False
+IS_SIMULATION = True
 ASVID = 17
-NUM_WAYPOINTS = 30
+NUM_WAYPOINTS = 40
 STEP_SIZE = 5.0
-SEND_TO_MONGO = True
+SEND_TO_MONGO = False
 
 # Plot configurations
 PATH_PLOT_ARGS = {"color": "black", "linestyle": "--"}

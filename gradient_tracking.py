@@ -21,10 +21,11 @@ warnings.filterwarnings("ignore", category=ConvergenceWarning)
 
 
 # Global Variables
-from config import (ASVID, DATA, FEATURE_TO_CHASE, IS_SIMULATION,
+from config import (ASVID, FEATURE_TO_CHASE, IS_SIMULATION,
                     NUM_WAYPOINTS, SEND_TO_MONGO, STEP_SIZE, THROTTLE,
                     PATH_PLOT_ARGS, CONTOURF_ARGS)
 
+DATA = pd.DataFrame()
 
 def start_mission(boat):
     """Start the mission by waiting for the operator to switch to waypoint mode."""
@@ -150,9 +151,9 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
 
     # Initialize Gaussian Process for water phenomenon
     kernel = (
-        10 * Matern(nu=0.5, length_scale_bounds=(1e-2, 1e5)) + 1e-2 * DotProduct() ** 1
+        10 * Matern(nu=1, length_scale_bounds=(1e1, 1e4)) + 1e-2 * DotProduct() ** .1
     )
-    water_feature_gp = water_phenomenon.WaterPhenomenonGP(extent_coordinates, kernel)
+    water_feature_gp = water_phenomenon.WaterPhenomenonGP(extent_coordinates, kernel, FEATURE_TO_CHASE, ASVID)
 
     boat = initialize_boat(erp)
 
