@@ -129,7 +129,7 @@ class MockSurveyor:
                     direction = self.waypoint - self.current_location
                     direction /= np.linalg.norm(direction)
                     self.current_location += direction * (speed / 111139)
-            time.sleep(.1)
+            time.sleep(1.1)
 
     def start(self):
         """

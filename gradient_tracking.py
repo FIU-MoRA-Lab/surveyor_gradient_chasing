@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 import surveyor_library.surveyor_lib.helpers as hlp
 import surveyor_library.surveyor_lib.surveyor as surveyor
-import utils.send_data_utils
+from utils.mongo_db_sender import MongoDBDataSender
 from utils import water_phenomenon
 
 warnings.filterwarnings("ignore", category=ConvergenceWarning)
@@ -26,6 +26,8 @@ from config import (ASVID, FEATURE_TO_CHASE, IS_SIMULATION,
                     PATH_PLOT_ARGS, CONTOURF_ARGS)
 
 DATA = pd.DataFrame()
+MISSION_POSTFIX = ""
+MONGO_DB_SENDER = None
 
 def start_mission(boat):
     """Start the mission by waiting for the operator to switch to waypoint mode."""
@@ -73,16 +75,17 @@ def plot_caller(boat, water_phenomenon, next_point):
 
 plot_caller.coordinates = np.empty((0, 2))
 
-def save_and_send_data(boat, mission_postfix=""):
+def save_and_send_data(boat):
     
-    hlp.save(boat.get_data(["exo2", "state"]), mission_postfix)
+    exodata = boat.get_data(["exo2"])
+    metadata = boat.get_data(["state"])
+    metadata["asvid"] = ASVID
+    hlp.save({**exodata, **metadata}, MISSION_POSTFIX)
     if SEND_TO_MONGO:
-        utils.send_data_utils.send_to_mongo(
-            boat, asvid=ASVID, mission_postfix=mission_postfix
-        )
+        MONGO_DB_SENDER.send_to_mongo(exodata, metadata)
 
 
-def data_updater(boat, mission_postfix=""):
+def data_updater(boat):
     
     """
     Update global DATA with new information from the boat.
@@ -94,7 +97,7 @@ def data_updater(boat, mission_postfix=""):
     global DATA
     data_dict = boat.get_data(["exo2", "state"])
     DATA = pd.concat([DATA, pd.DataFrame([data_dict])])
-    save_and_send_data(boat, mission_postfix)
+    save_and_send_data(boat)
 
 
 def next_waypoint(water_feature_gp, step_size=4.0):
@@ -114,7 +117,7 @@ def next_waypoint(water_feature_gp, step_size=4.0):
     return water_feature_gp.next_point(X[-1], step_size)
 
 
-def process_waypoint(boat, water_feature_gp, waypoint, mission_postfix="", delay=0.5):
+def process_waypoint(boat, water_feature_gp, waypoint, delay=0.5):
     """
     Process a single waypoint: update plot, log information, and send data to MongoDB if enabled.
 
@@ -122,17 +125,17 @@ def process_waypoint(boat, water_feature_gp, waypoint, mission_postfix="", delay
         boat: The boat object.
         water_feature_gp: The water phenomenon Gaussian Process object.
         waypoint (tuple): The current waypoint (lat, lon).
-        mission_postfix (str): Optional postfix for mission-specific data saving.
+        
     """
     current_coordinates = plot_caller(boat, water_feature_gp, waypoint)
     print(
         f"Waypoint {waypoint}. Distance {geodesic(current_coordinates, waypoint).meters:.3f}", end='\r'
     )
-    save_and_send_data(boat, mission_postfix)
+    save_and_send_data(boat)
     time.sleep(delay)
 
 
-def main(filename, erp_filename, extent_filename, mission_postfix=""):
+def main(filename, erp_filename, extent_filename):
     """
     Main function to execute the gradient chasing mission.
 
@@ -140,7 +143,6 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
         filename (str): The filename of the waypoints CSV.
         erp_filename (str): The filename of the ERP CSV.
         extent_filename (str): The filename of the extent coordinates CSV.
-        mission_postfix (str): Optional postfix for mission-specific data saving.
     """
     print(
         f"Reading waypoints from {filename}, ERP from {erp_filename}, and extent coordinates from {extent_filename}"
@@ -151,7 +153,7 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
 
     # Initialize Gaussian Process for water phenomenon
     kernel = (
-        10 * Matern(nu=1, length_scale_bounds=(1e1, 1e4)) + 1e-2 * DotProduct() ** .1
+        10 * Matern(nu=5/2, length_scale_bounds=(1e1, 1e4)) + 1e-2 * DotProduct() ** .1
     )
     water_feature_gp = water_phenomenon.WaterPhenomenonGP(extent_coordinates, kernel, FEATURE_TO_CHASE, ASVID)
 
@@ -170,12 +172,10 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
 
             while boat.get_control_mode() == "Waypoint":
                 process_waypoint(
-                    boat, water_feature_gp, initial_waypoint, mission_postfix, 0.5
+                    boat, water_feature_gp, initial_waypoint, 0.5
                 )
 
-            data_updater(
-                boat, mission_postfix=mission_postfix
-            )  # Finished, getting data
+            data_updater(boat)  # Finished, getting data
 
         print("Starting gradient tracking mission...")
         for i in tqdm(range(NUM_WAYPOINTS), desc="Gradient Chasing Progress"):
@@ -184,10 +184,10 @@ def main(filename, erp_filename, extent_filename, mission_postfix=""):
             boat.go_to_waypoint(waypoint, erp, THROTTLE)
 
             while boat.get_control_mode() == "Waypoint":
-                process_waypoint(boat, water_feature_gp, waypoint, mission_postfix, 0.5)
+                process_waypoint(boat, water_feature_gp, waypoint, 0.5)
 
             print(f"Arrived at waypoint {i + 1}.")
-            data_updater(boat, mission_postfix=mission_postfix)
+            data_updater(boat)
         plt.show()  # Show the plot after the mission ends
 
 
@@ -214,9 +214,12 @@ if __name__ == "__main__":
 
     # Call the main function with the parsed arguments
     try:
-        main(
-            args.filename, args.erp_filename, args.extent_filename, args.mission_postfix
+        MISSION_POSTFIX = args.mission_postfix
+        MONGO_DB_SENDER = MongoDBDataSender(
+            prefix=None, mission_postfix=MISSION_POSTFIX, db_name="missions",
+            queue_maxlen=500, sleep_time=0.2
         )
+        main(args.filename, args.erp_filename, args.extent_filename)
     except KeyboardInterrupt:
         print("Mission interrupted by user.")
         sys.exit(0)

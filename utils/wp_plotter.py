@@ -194,9 +194,15 @@ class WaterPhenomenonPlotter:
         )
         if self._contour is not None:
             try:
-                self._contour.remove()
-                self._cax.cla()
-                self._current_point.remove()
+                if self._colorbar:
+                    
+                    self._cax.clear()
+                    self._colorbar.remove()
+                    self._colorbar = None
+                if self._contour:
+                    self._contour.remove()
+                if self._current_point:
+                    self._current_point.remove()
             except AttributeError:
                 pass
         self._contour = self._axis.contourf(
@@ -204,9 +210,14 @@ class WaterPhenomenonPlotter:
             transform=ccrs.PlateCarree(), **self._contourf_args,
         )
         self._contour.set_clip_path(self._poly_patch)
+        # self._colorbar.update_normal(self._contour)
+        self._cax = make_axes_locatable(self._axis).append_axes(
+            "right", size="5%", pad=0.1, axes_class=plt.Axes
+        )
         self._colorbar = self._figure.colorbar(
             self._contour, cax=self._cax, orientation="vertical"
         )
+        # self._colorbar.set_clim(vmin=0,vmax=114)
         self._path_plot.set_xdata(path[:-1, 1])
         self._path_plot.set_ydata(path[:-1, 0])
         self._next_point_plot.set_offsets([[next_point[1], next_point[0]]])
